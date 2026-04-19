@@ -1,0 +1,25 @@
+name: Actualizador de Precios Temu
+on:
+  schedule:
+    - cron: '0 */12 * * *' # Se ejecuta cada 12 horas automáticamente
+  workflow_dispatch: # Esto permite que lo actives tú manualmente
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v3
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Ejecutar Scraper
+        run: node index.js
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
