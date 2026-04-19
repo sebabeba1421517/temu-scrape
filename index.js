@@ -15,31 +15,38 @@ const misProductos = [
 ];
 
 async function procesar() {
+    if (!token) {
+        console.error("❌ ERROR: El SCRAPEDO_TOKEN no está configurado en los Secrets de GitHub.");
+        return;
+    }
+    
     for (const p of misProductos) {
         try {
             console.log(`🔍 Consultando ${p.id}...`);
-            
-            // Scrape.do se encarga de saltar el bloqueo de Temu
             const targetUrl = encodeURIComponent(p.url);
-            const apiRes = await axios.get(`https://api.scrape.do?token=${token}&url=${targetUrl}`);
+            
+            // Llamada a la API de Scrape.do
+            const response = await axios.get(`https://api.scrape.do?token=${token}&url=${targetUrl}`);
 
-            // Buscamos el precio en el HTML con una expresión regular
-            // Temu suele ponerlo como "S/ 20.76" o "S/20.76"
-            const match = apiRes.data.match(/S\/\s?(\d+\.\d{2})/);
+            // Buscamos el precio en el HTML
+            const match = response.data.match(/S\/\s?(\d+\.\d{2})/);
 
             if (match) {
                 const precio = parseFloat(match[1]);
                 await db.collection('productos').doc(p.id).set({
                     precioTemu: precio,
-                    ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp()
+                    ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp(),
+                    estado: 'actualizado'
                 }, { merge: true });
                 console.log(`✅ ${p.id}: S/ ${precio}`);
             } else {
-                console.log(`❌ No se halló precio en ${p.id}. Probando otro método...`);
+                console.log(`⚠️ No se halló precio en el HTML de ${p.id}. Puede que el producto esté agotado.`);
             }
         } catch (e) {
-            console.error(`Error en ${p.id}:`, e.message);
+            // Aquí capturamos el error 401 que te salió
+            console.error(`❌ Error en ${p.id}: ${e.response ? e.response.status : e.message}`);
         }
+        await new Promise(r => setTimeout(r, 1000));
     }
 }
 
