@@ -1,7 +1,6 @@
 const admin = require('firebase-admin');
 const axios = require('axios');
 
-// 1. Configuración de Firebase
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 const token = process.env.SCRAPEDO_TOKEN;
 
@@ -12,7 +11,6 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-// 2. Tu lista de productos de Temu
 const misProductos = [
     { id: 'tapones_pro_3', url: 'https://www.temu.com/pe/g-601105668136049.html' },
     { id: 'audifonos_lenovo_gm2', url: 'https://www.temu.com/pe/g-601099513328221.html' },
@@ -20,48 +18,52 @@ const misProductos = [
 ];
 
 async function procesar() {
-    console.log("--- Inicio del proceso ---");
+    console.log("--- 🚀 Iniciando Búsqueda Profunda ---");
     
-    if (!token) {
-        console.error("❌ ERROR: El SCRAPEDO_TOKEN no se detectó en el entorno.");
-        return;
-    }
-
     for (const p of misProductos) {
         try {
-            console.log(`🔍 Consultando precio para: ${p.id}...`);
-            
-            // Usamos Scrape.do para evitar que Temu nos bloquee
+            console.log(`🔍 Escaneando: ${p.id}...`);
             const targetUrl = encodeURIComponent(p.url);
-            const apiRes = await axios.get(`https://api.scrape.do?token=${token}&url=${targetUrl}`);
+            
+            // Agregamos "&render=true" para que Scrape.do espere a que cargue el JavaScript
+            const apiRes = await axios.get(`https://api.scrape.do?token=${token}&url=${targetUrl}&render=true`);
 
-            // Buscamos el patrón "S/ XX.XX" en el código de la página
-            const match = apiRes.data.match(/S\/\s?(\d+\.\d{2})/);
+            const html = apiRes.data;
+            let precioEncontrado = null;
 
-            if (match) {
-                const precio = parseFloat(match[1]);
+            // Intento 1: Buscar patrón S/ XX.XX
+            const match1 = html.match(/S\/\s?(\d+\.\d{2})/);
+            // Intento 2: Buscar en las etiquetas de meta datos (suelen ser más estables)
+            const match2 = html.match(/"price":\s?"(\d+\.\d{2})"/);
+            // Intento 3: Buscar precio con coma (a veces sale S/ 20,76)
+            const match3 = html.match(/S\/\s?(\d+,\d{2})/);
+
+            if (match1) precioEncontrado = match1[1];
+            else if (match2) precioEncontrado = match2[1];
+            else if (match3) precioEncontrado = match3[1].replace(',', '.');
+
+            if (precioEncontrado) {
+                const precioFinal = parseFloat(precioEncontrado);
                 
-                // Guardamos en Firebase
                 await db.collection('productos').doc(p.id).set({
-                    precioTemu: precio,
+                    precioTemu: precioFinal,
                     ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp(),
-                    moneda: 'PEN',
-                    enlace: p.url
+                    url: p.url
                 }, { merge: true });
 
-                console.log(`✅ ${p.id} actualizado con éxito: S/ ${precio}`);
+                console.log(`✅ ${p.id}: S/ ${precioFinal}`);
             } else {
-                console.log(`⚠️ No se encontró el precio en el HTML de ${p.id}.`);
+                console.log(`⚠️ Temu escondió el precio de ${p.id}. Intentando reporte de depuración...`);
+                // Esto nos servirá para ver qué está viendo el robot si falla
+                // console.log(html.substring(0, 500)); 
             }
 
         } catch (e) {
             console.error(`❌ Error en ${p.id}: ${e.message}`);
         }
-        
-        // Pausa de 2 segundos para no saturar la API
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 3000)); // Pausa de seguridad
     }
-    console.log("--- Proceso terminado ---");
+    console.log("--- ✅ Fin del proceso ---");
 }
 
 procesar();
