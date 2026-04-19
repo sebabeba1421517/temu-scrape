@@ -1,8 +1,8 @@
 name: Actualizador de Precios Temu
 on:
   schedule:
-    - cron: '0 */12 * * *' # Se ejecuta cada 12 horas automáticamente
-  workflow_dispatch: # Esto permite que lo actives tú manualmente
+    - cron: '0 */12 * * *' # Cada 12 horas
+  workflow_dispatch: # Botón manual
 
 jobs:
   build:
@@ -18,6 +18,9 @@ jobs:
 
       - name: Instalar dependencias
         run: npm install
+
+      - name: Instalar Navegador Chrome
+        run: npx puppeteer browsers install chrome
 
       - name: Ejecutar Scraper
         run: node index.js
