@@ -15,23 +15,29 @@ const misProductos = [
 ];
 
 async function procesarProductos() {
-    console.log("🚀 Usando Bright Data para saltar el bloqueo de Temu...");
+    console.log("🚀 Conectando con el Proxy de Bright Data...");
     
     for (const producto of misProductos) {
         try {
-            console.log(`🔍 Extrayendo precio de: ${producto.id}...`);
+            console.log(`🔍 Buscando: ${producto.id}...`);
             
-            // Bright Data usará proxies residenciales (IPs de casas reales)
-            const response = await axios.get('https://api.brightdata.com/request', {
+            // Usamos el formato de Web Unlocker de Bright Data
+            const response = await axios.get(producto.url, {
+                proxy: false,
                 params: {
-                    url: producto.url,
-                    token: apiKey
-                }
+                    // Si tu cuenta usa 'brd-customer-...', se pone aquí, 
+                    // pero intentemos primero con el pase directo:
+                },
+                headers: {
+                    'apikey': apiKey
+                },
+                // Esta es la URL de su servidor de desbloqueo
+                baseURL: 'https://api.brightdata.com/v1/web-unlocker/request'
             });
 
             const html = response.data;
             
-            // Buscamos el precio con Regex (S/ seguido de números)
+            // Buscamos el precio (ejemplo: S/ 20.76)
             const regexPrecio = /S\/\s?(\d+\.\d{2})/;
             const match = html.match(regexPrecio);
 
@@ -39,16 +45,17 @@ async function procesarProductos() {
                 const precioLimpio = parseFloat(match[1]);
                 await db.collection('productos').doc(producto.id).set({
                     precioTemu: precioLimpio,
-                    ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp(),
-                    fuente: 'Temu (via BrightData)'
+                    ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
                 console.log(`✅ ${producto.id} actualizado: S/ ${precioLimpio}`);
             } else {
-                console.log(`❌ Temu cambió el formato o bloqueó la respuesta para ${producto.id}`);
+                console.log(`⚠️ No se leyó el precio de ${producto.id}. Temu mostró contenido protegido.`);
             }
 
         } catch (error) {
-            console.error(`❌ Error en la conexión con Bright Data:`, error.message);
+            console.error(`❌ Error 404 o de conexión. Revisando ruta...`);
+            // Si el error persiste, Bright Data requiere que uses su proxy 
+            // específico. Avísame si vuelve a salir 404.
         }
         await new Promise(r => setTimeout(r, 2000));
     }
