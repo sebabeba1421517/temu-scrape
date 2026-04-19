@@ -1,94 +1,63 @@
 const puppeteer = require('puppeteer');
 const admin = require('firebase-admin');
 
-// Configuración de la llave de GitHub Secrets
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
 if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 }
-
 const db = admin.firestore();
 
-// --- TU LISTA DE PRODUCTOS SELECCIONADOS ---
 const misProductos = [
-    { 
-        id: 'tapones_pro_3', 
-        name: 'Tapones Silicona AirPods',
-        url: 'https://www.temu.com/pe/g-601105668136049.html' 
-    },
-    { 
-        id: 'audifonos_lenovo_gm2', 
-        name: 'Audífonos Gamer Lenovo',
-        url: 'https://www.temu.com/pe/g-601099513328221.html' 
-    },
-    { 
-        id: 'smartwatch_ultra_8', 
-        name: 'Smartwatch Serie 8 Ultra',
-        url: 'https://www.temu.com/pe/g-601099512351234.html' 
-    },
-    { 
-        id: 'proyector_portatil_hd', 
-        name: 'Mini Proyector LED',
-        url: 'https://www.temu.com/pe/g-601099538827110.html' 
-    },
-    { 
-        id: 'mouse_gamer_rgb', 
-        name: 'Mouse Inalámbrico Recargable',
-        url: 'https://www.temu.com/pe/g-601099515543210.html' 
-    }
+    { id: 'tapones_pro_3', name: 'Tapones Silicona AirPods', url: 'https://www.temu.com/pe/g-601105668136049.html' },
+    { id: 'audifonos_lenovo_gm2', name: 'Audífonos Gamer Lenovo', url: 'https://www.temu.com/pe/g-601099513328221.html' },
+    { id: 'smartwatch_ultra_8', name: 'Smartwatch Serie 8 Ultra', url: 'https://www.temu.com/pe/g-601099512351234.html' }
 ];
 
 async function procesarProductos() {
     console.log(`🚀 Iniciando actualización de ${misProductos.length} productos...`);
-    
     const browser = await puppeteer.launch({ 
         headless: "new",
-        args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1920,1080'] 
     });
 
     const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    // Disfraz premium para que Temu no nos bloquee
+    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
     for (const producto of misProductos) {
         try {
-            console.log(`🔍 Scrapeando: ${producto.name}...`);
-            // Navegar al producto
-            await page.goto(producto.url, { waitUntil: 'networkidle2', timeout: 60000 });
+            console.log(`🔍 Intentando con: ${producto.name}...`);
+            await page.goto(producto.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            
+            // Esperamos unos segundos para que cargue el precio
+            await new Promise(r => setTimeout(r, 5000)); 
 
-            // Extraer el objeto de datos de Temu
-            const rawData = await page.evaluate(() => window.rawData);
+            // Nueva forma de sacar el precio buscando directamente el texto en la pantalla
+            const precioDetectado = await page.evaluate(() => {
+                // Buscamos el elemento que suele tener el precio en Temu
+                const el = document.querySelector('.ecf05._90729_23_3_7'); // Clase común de precio
+                return el ? el.innerText : null;
+            });
 
-            if (rawData && rawData.store && rawData.store.priceModule) {
-                const precioStr = rawData.store.priceModule.data.goodsSalePriceRich.ariaLabel;
-                const precioLimpio = parseFloat(precioStr.replace(/[^\d.]/g, ''));
-
-                // Actualizar Firestore
+            if (precioDetectado) {
+                const precioLimpio = parseFloat(precioDetectado.replace(/[^\d.]/g, ''));
                 await db.collection('productos').doc(producto.id).set({
                     nombre: producto.name,
                     precioTemu: precioLimpio,
-                    urlCompra: producto.url,
-                    ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp(),
-                    moneda: 'PEN'
+                    ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
-
-                console.log(`✅ Actualizado: ${producto.id} -> S/ ${precioLimpio}`);
+                console.log(`✅ ${producto.id}: S/ ${precioLimpio}`);
             } else {
-                console.log(`⚠️ No se pudo obtener el precio de: ${producto.name}`);
+                console.log(`❌ No se encontró el precio para ${producto.name}. Temu bloqueó la vista.`);
             }
-            
-            // Espera de 4 segundos para evitar que Temu nos bloquee por sospechosos
-            await new Promise(r => setTimeout(r, 4000)); 
+
+            await new Promise(r => setTimeout(r, 6000)); // Pausa más larga para ser "humanos"
 
         } catch (error) {
             console.error(`❌ Error en ${producto.id}:`, error.message);
         }
     }
-
     await browser.close();
-    console.log("--- ✅ Catálogo actualizado correctamente en Firebase ---");
 }
 
 procesarProductos();
