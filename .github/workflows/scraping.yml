@@ -1,12 +1,14 @@
 name: Actualizador de Precios Temu
+
 on:
+  workflow_dispatch: # Permite ejecutarlo manualmente
   schedule:
-    - cron: '0 */12 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *' # Se ejecuta cada 6 horas automáticamente
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout del código
         uses: actions/checkout@v3
@@ -14,15 +16,13 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Instalar dependencias
         run: npm install
 
-      - name: Instalar Navegador Chrome
-        run: npx puppeteer browsers install chrome
-
       - name: Ejecutar Scraper
-        run: node index.js
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          SCRAPEDO_TOKEN: ${{ secrets.SCRAPEDO_TOKEN }}
+        run: node index.js
