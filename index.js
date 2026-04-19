@@ -2,7 +2,7 @@ const admin = require('firebase-admin');
 const axios = require('axios');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-const apiKey = process.env.BRIGHTDATA_API_KEY;
+const token = process.env.SCRAPEDO_TOKEN;
 
 if (!admin.apps.length) {
     admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
@@ -14,51 +14,33 @@ const misProductos = [
     { id: 'audifonos_lenovo_gm2', url: 'https://www.temu.com/pe/g-601099513328221.html' }
 ];
 
-async function procesarProductos() {
-    console.log("🚀 Conectando con el Proxy de Bright Data...");
-    
-    for (const producto of misProductos) {
+async function procesar() {
+    for (const p of misProductos) {
         try {
-            console.log(`🔍 Buscando: ${producto.id}...`);
+            console.log(`🔍 Consultando ${p.id}...`);
             
-            // Usamos el formato de Web Unlocker de Bright Data
-            const response = await axios.get(producto.url, {
-                proxy: false,
-                params: {
-                    // Si tu cuenta usa 'brd-customer-...', se pone aquí, 
-                    // pero intentemos primero con el pase directo:
-                },
-                headers: {
-                    'apikey': apiKey
-                },
-                // Esta es la URL de su servidor de desbloqueo
-                baseURL: 'https://api.brightdata.com/v1/web-unlocker/request'
-            });
+            // Scrape.do se encarga de saltar el bloqueo de Temu
+            const targetUrl = encodeURIComponent(p.url);
+            const apiRes = await axios.get(`https://api.scrape.do?token=${token}&url=${targetUrl}`);
 
-            const html = response.data;
-            
-            // Buscamos el precio (ejemplo: S/ 20.76)
-            const regexPrecio = /S\/\s?(\d+\.\d{2})/;
-            const match = html.match(regexPrecio);
+            // Buscamos el precio en el HTML con una expresión regular
+            // Temu suele ponerlo como "S/ 20.76" o "S/20.76"
+            const match = apiRes.data.match(/S\/\s?(\d+\.\d{2})/);
 
             if (match) {
-                const precioLimpio = parseFloat(match[1]);
-                await db.collection('productos').doc(producto.id).set({
-                    precioTemu: precioLimpio,
+                const precio = parseFloat(match[1]);
+                await db.collection('productos').doc(p.id).set({
+                    precioTemu: precio,
                     ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
-                console.log(`✅ ${producto.id} actualizado: S/ ${precioLimpio}`);
+                console.log(`✅ ${p.id}: S/ ${precio}`);
             } else {
-                console.log(`⚠️ No se leyó el precio de ${producto.id}. Temu mostró contenido protegido.`);
+                console.log(`❌ No se halló precio en ${p.id}. Probando otro método...`);
             }
-
-        } catch (error) {
-            console.error(`❌ Error 404 o de conexión. Revisando ruta...`);
-            // Si el error persiste, Bright Data requiere que uses su proxy 
-            // específico. Avísame si vuelve a salir 404.
+        } catch (e) {
+            console.error(`Error en ${p.id}:`, e.message);
         }
-        await new Promise(r => setTimeout(r, 2000));
     }
 }
 
-procesarProductos();
+procesar();
