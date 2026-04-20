@@ -5,9 +5,7 @@ const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 const token = process.env.SCRAPEDO_TOKEN;
 
 if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 }
 const db = admin.firestore();
 
@@ -18,50 +16,49 @@ const misProductos = [
 ];
 
 async function procesar() {
-    console.log("--- 🚀 Iniciando Búsqueda Profunda ---");
+    console.log("--- 🚀 Iniciando Extracción de Metadatos ---");
     
     for (const p of misProductos) {
         try {
-            console.log(`🔍 Escaneando: ${p.id}...`);
-            const targetUrl = encodeURIComponent(p.url);
+            console.log(`🔍 Analizando código de: ${p.id}...`);
             
-            // Agregamos "&render=true" para que Scrape.do espere a que cargue el JavaScript
+            // Usamos Scrape.do con render=true para que Temu suelte los datos
+            const targetUrl = encodeURIComponent(p.url);
             const apiRes = await axios.get(`https://api.scrape.do?token=${token}&url=${targetUrl}&render=true`);
 
             const html = apiRes.data;
-            let precioEncontrado = null;
+            let precioFinal = null;
 
-            // Intento 1: Buscar patrón S/ XX.XX
-            const match1 = html.match(/S\/\s?(\d+\.\d{2})/);
-            // Intento 2: Buscar en las etiquetas de meta datos (suelen ser más estables)
-            const match2 = html.match(/"price":\s?"(\d+\.\d{2})"/);
-            // Intento 3: Buscar precio con coma (a veces sale S/ 20,76)
-            const match3 = html.match(/S\/\s?(\d+,\d{2})/);
+            // MÉTODO 1: Buscar en el objeto "goodsSalePrice" (Formato JSON interno de Temu)
+            const regexPrecioJSON = /"goodsSalePrice":\s?(\d+)/; 
+            const matchJSON = html.match(regexPrecioJSON);
 
-            if (match1) precioEncontrado = match1[1];
-            else if (match2) precioEncontrado = match2[1];
-            else if (match3) precioEncontrado = match3[1].replace(',', '.');
+            if (matchJSON) {
+                // Temu a veces manda el precio en céntimos (ej: 2076 en vez de 20.76)
+                precioFinal = parseFloat(matchJSON[1]) / 100;
+            } else {
+                // MÉTODO 2: Buscar el precio en el texto plano si el JSON falla
+                const matchTexto = html.match(/S\/\s?(\d+\.\d{2})/);
+                if (matchTexto) precioFinal = parseFloat(matchTexto[1]);
+            }
 
-            if (precioEncontrado) {
-                const precioFinal = parseFloat(precioEncontrado);
-                
+            if (precioFinal && precioFinal > 0) {
                 await db.collection('productos').doc(p.id).set({
                     precioTemu: precioFinal,
                     ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp(),
-                    url: p.url
+                    url: p.url,
+                    status: 'online'
                 }, { merge: true });
 
-                console.log(`✅ ${p.id}: S/ ${precioFinal}`);
+                console.log(`✅ ${p.id}: S/ ${precioFinal.toFixed(2)}`);
             } else {
-                console.log(`⚠️ Temu escondió el precio de ${p.id}. Intentando reporte de depuración...`);
-                // Esto nos servirá para ver qué está viendo el robot si falla
-                // console.log(html.substring(0, 500)); 
+                console.log(`⚠️ No se detectó precio válido para ${p.id}. Temu podría estar solicitando verificación humana.`);
             }
 
         } catch (e) {
             console.error(`❌ Error en ${p.id}: ${e.message}`);
         }
-        await new Promise(r => setTimeout(r, 3000)); // Pausa de seguridad
+        await new Promise(r => setTimeout(r, 4000)); // Pausa más larga
     }
     console.log("--- ✅ Fin del proceso ---");
 }
