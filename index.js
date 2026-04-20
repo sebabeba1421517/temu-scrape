@@ -16,51 +16,53 @@ const misProductos = [
 ];
 
 async function procesar() {
-    console.log("--- 🚀 Iniciando Extracción de Metadatos ---");
+    console.log("--- 🛠️ Iniciando Extracción Avanzada ---");
     
     for (const p of misProductos) {
         try {
-            console.log(`🔍 Analizando código de: ${p.id}...`);
+            console.log(`🔍 Intentando saltar bloqueo para: ${p.id}...`);
             
-            // Usamos Scrape.do con render=true para que Temu suelte los datos
+            // Usamos Scrape.do con parámetros extra para parecer un móvil real
             const targetUrl = encodeURIComponent(p.url);
-            const apiRes = await axios.get(`https://api.scrape.do?token=${token}&url=${targetUrl}&render=true`);
+            const apiRes = await axios.get(`https://api.scrape.do?token=${token}&url=${targetUrl}&render=true&super=true&geoCode=pe`);
 
             const html = apiRes.data;
             let precioFinal = null;
 
-            // MÉTODO 1: Buscar en el objeto "goodsSalePrice" (Formato JSON interno de Temu)
-            const regexPrecioJSON = /"goodsSalePrice":\s?(\d+)/; 
-            const matchJSON = html.match(regexPrecioJSON);
+            // Buscamos en 4 lugares diferentes del código
+            const patterns = [
+                /price["']:\s?["']?(\d+\.\d{2})["']?/, // JSON de metadatos
+                /["']linePriceRaw["']:\s?(\d+)/,      // Datos crudos de Temu (en céntimos)
+                /S\/\s?(\d+\.\d{2})/,                 // Texto visible
+                /priceContent["']:\s?["'](\d+\.\d{2})["']/ // Atributos de oferta
+            ];
 
-            if (matchJSON) {
-                // Temu a veces manda el precio en céntimos (ej: 2076 en vez de 20.76)
-                precioFinal = parseFloat(matchJSON[1]) / 100;
-            } else {
-                // MÉTODO 2: Buscar el precio en el texto plano si el JSON falla
-                const matchTexto = html.match(/S\/\s?(\d+\.\d{2})/);
-                if (matchTexto) precioFinal = parseFloat(matchTexto[1]);
+            for (const pattern of patterns) {
+                const match = html.match(pattern);
+                if (match) {
+                    // Si es el patrón de céntimos (linePriceRaw), dividimos entre 100
+                    precioFinal = pattern.toString().includes('linePriceRaw') ? parseFloat(match[1]) / 100 : parseFloat(match[1]);
+                    if (precioFinal > 0) break;
+                }
             }
 
-            if (precioFinal && precioFinal > 0) {
+            if (precioFinal) {
                 await db.collection('productos').doc(p.id).set({
                     precioTemu: precioFinal,
                     ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp(),
-                    url: p.url,
                     status: 'online'
                 }, { merge: true });
-
                 console.log(`✅ ${p.id}: S/ ${precioFinal.toFixed(2)}`);
             } else {
-                console.log(`⚠️ No se detectó precio válido para ${p.id}. Temu podría estar solicitando verificación humana.`);
+                console.log(`❌ Temu sigue bloqueando la IP. Intentando bypass...`);
             }
 
         } catch (e) {
             console.error(`❌ Error en ${p.id}: ${e.message}`);
         }
-        await new Promise(r => setTimeout(r, 4000)); // Pausa más larga
+        await new Promise(r => setTimeout(r, 5000)); // Espera de 5 seg para no levantar sospechas
     }
-    console.log("--- ✅ Fin del proceso ---");
+    console.log("--- Fin ---");
 }
 
 procesar();
